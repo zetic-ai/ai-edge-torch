@@ -167,3 +167,8 @@ cython_debug/
 # Bazel
 /bazel-*
 MODULE.bazel.lock
+*.tflite
+*.litertlm
+resources/
+*.pth
+scripts/
