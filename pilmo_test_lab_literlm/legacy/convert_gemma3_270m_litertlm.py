@@ -11,23 +11,23 @@ def main():
     repo_id = "google/gemma-3-270m-it"
     output_dir = "./output"
 
-    # 1. Hugging Face에서 체크포인트 다운로드
+    # 1. Download checkpoint from Hugging Face
     print(f"Downloading weights from Hugging Face: {repo_id}...")
     checkpoint_dir = snapshot_download(repo_id)
     print(f"Weights downloaded to: {checkpoint_dir}")
 
-    # 2. Gemma 3-270M PyTorch 모델 빌드
-    # 이 함수는 내부적으로 checkpoint_dir의 safetensors를 로드합니다.
+    # 2. Build Gemma 3-270M PyTorch model
+    # This function internally loads safetensors from checkpoint_dir.
     print("Building PyTorch model...")
     pytorch_model = gemma3.build_model_270m(checkpoint_dir)
 
-    # 3. 내보내기 설정 (KV Cache 최적화)
+    # 3. Export configuration (KV Cache optimization)
     export_config = ExportConfig()
     export_config.kvcache_layout = kv_cache.KV_LAYOUT_TRANSPOSED
     export_config.mask_as_input = True
 
-    # 4. LiteRT-LM (.litertlm) 번들링용 메타데이터 설정
-    # Gemma 3-it(Instruction Tuned) 모델의 표준 프롬프트 템플릿을 적용합니다.
+    # 4. Configure metadata for LiteRT-LM (.litertlm) bundling
+    # Apply special prompt template for Gemma 3-it (Instruction Tuned) models.
     litertlm_config = {
         "tokenizer_model_path": os.path.join(checkpoint_dir, "tokenizer.model"),
         "start_token_id": 2,  # "<bos>"
@@ -36,22 +36,22 @@ def main():
         "user_prompt_suffix": "<end_of_turn>\n",
         "model_prompt_prefix": "<start_of_turn>model\n",
         "model_prompt_suffix": "<end_of_turn>\n",
-        "output_format": "litertlm",  # .litertlm 번들 생성을 지시
+        "output_format": "litertlm",  # Instructs .litertlm bundle generation
     }
 
     print("Starting conversion to .litertlm format...")
     os.makedirs(output_dir, exist_ok=True)
 
-    # 5. 변환 실행
+    # 5. Execute conversion
     try:
-        # 이 함수가 내부적으로 TFLite 변환 후 .litertlm으로 패키징합니다.
+        # This function internally converts to TFLite and packages into .litertlm.
         converter.convert_to_litert(
             pytorch_model,
             output_path=output_dir,
             output_name_prefix="gemma-3-270m",
-            prefill_seq_len=1024,  # 모바일 기기 성능을 고려한 적절한 길이
+            prefill_seq_len=1024,  # Appropriate length for mobile device performance
             kv_cache_max_len=2048,
-            quantize="dynamic_int8",  # 8-bit 양자화 적용
+            quantize="dynamic_int8",  # Apply 8-bit dynamic quantization
             export_config=export_config,
             **litertlm_config,
         )
@@ -62,7 +62,7 @@ def main():
         print("=" * 50)
     except Exception as e:
         print(f"\n[FAILED] Conversion error: {e}")
-        # .litertlm 빌더는 ai-edge-litert-nightly에 포함된 경우가 많습니다.
+        # The .litertlm builder is often included in ai-edge-litert-nightly.
         if "LiteRT-LM builder" in str(e):
             print("\nAdvice: You need the nightly packages for the .litertlm builder.")
             print(

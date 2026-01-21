@@ -172,3 +172,5 @@ MODULE.bazel.lock
 resources/
 *.pth
 scripts/
+*.pb
+*.txt

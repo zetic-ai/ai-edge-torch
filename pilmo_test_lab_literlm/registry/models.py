@@ -11,11 +11,12 @@ MODEL_SPECS = {
         "builder": gemma3.build_model_270m,
         "litertlm_metadata": {
             "start_token_id": 2,
-            "stop_token_ids": [1, 106],
+            "stop_token_ids": [106, 1],
             "user_prompt_prefix": "<start_of_turn>user\n",
             "user_prompt_suffix": "<end_of_turn>\n",
             "model_prompt_prefix": "<start_of_turn>model\n",
             "model_prompt_suffix": "<end_of_turn>\n",
+            "llm_model_type": "gemma3",  # 니증에 아닌거 같으면 지워
         },
     },
     "gemma-3-1b": {
@@ -23,11 +24,12 @@ MODEL_SPECS = {
         "builder": gemma3.build_model_1b,
         "litertlm_metadata": {
             "start_token_id": 2,
-            "stop_token_ids": [1, 106],
+            "stop_token_ids": [106, 1],
             "user_prompt_prefix": "<start_of_turn>user\n",
             "user_prompt_suffix": "<end_of_turn>\n",
             "model_prompt_prefix": "<start_of_turn>model\n",
             "model_prompt_suffix": "<end_of_turn>\n",
+            "llm_model_type": "gemma3",
         },
     },
 }
