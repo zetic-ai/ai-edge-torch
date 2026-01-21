@@ -21,7 +21,7 @@ import ai_edge_torch
 from ai_edge_torch.quantize import pt2e_quantizer
 from ai_edge_torch.quantize import quant_config
 import torch
-from torch.ao.quantization import quantize_pt2e
+from torchao.quantization.pt2e import quantize_pt2e
 import torchvision
 
 from absl.testing import absltest as googletest
@@ -49,7 +49,7 @@ class TestQuantizerSanityBasic(googletest.TestCase):
     quantizer = pt2e_quantizer.PT2EQuantizer().set_global(
         pt2e_quantizer.get_symmetric_quantization_config()
     )
-    model = torch.export.export_for_training(model, sample_input).module()
+    model = torch.export.export(model, sample_input).module()
     model = quantize_pt2e.prepare_pt2e(model, quantizer)
     model = quantize_pt2e.convert_pt2e(model, fold_quantize=False)
 
