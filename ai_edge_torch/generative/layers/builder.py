@@ -128,6 +128,33 @@ def build_ff(dim: int, config: cfg.FeedForwardConfig):
   )
 
 
+def build_attention_layer(config: cfg.TransformerBlockConfig, mcfg: cfg.ModelConfig):
+  """Builder function for Attention layer.
+
+  Args:
+    config (TransformerBlockConfig): the transformer block configuration.
+    mcfg (ModelConfig): the model configuration.
+
+  Returns:
+    The constructed attention layer module.
+  """
+  from ai_edge_torch.generative.layers import attention
+  return attention.CausalSelfAttention(config, mcfg)
+
+
+def build_ff_layer(config: cfg.TransformerBlockConfig, mcfg: cfg.ModelConfig):
+  """Builder function for FeedForward layer from TransformerBlockConfig.
+
+  Args:
+    config (TransformerBlockConfig): the transformer block configuration.
+    mcfg (ModelConfig): the model configuration.
+
+  Returns:
+    The constructed feedforward layer module.
+  """
+  return build_ff(mcfg.embedding_dim, config.ff_config)
+
+
 def get_activation(config: cfg.ActivationConfig):
   """Get pytorch callable activation from the activation config.
 
