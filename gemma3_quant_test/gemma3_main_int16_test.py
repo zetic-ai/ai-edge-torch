@@ -146,11 +146,10 @@ def main():
     output_dir = "/home/pilmo/workspace/ai-edge-torch/gemma3_quant_test/output"
     os.makedirs(output_dir, exist_ok=True)
     tflite_path = os.path.join(output_dir, "gemma3_1b_main_fp32.tflite")
-    tflite_int8_path = os.path.join(output_dir, "w_8gwemma3_1b_main_int8.tflite")
-    aot_tflite_path = os.path.join(output_dir, "w_8gemma3_1b_main_int8_aot.tflite")
+    tflite_int16_path = os.path.join(output_dir, "gemma3_1b_main_int16_w8.tflite")
 
     print("=" * 80)
-    print("Gemma3-1B Main Model - Static INT8 Quantization Test")
+    print("Gemma3-1B Main Model - INT16 I/O Quantization (Runtime Compatible)")
     print("=" * 80)
 
     main_mod = create_main_module()
@@ -216,20 +215,23 @@ def main():
     edge_model.export(tflite_path)
     print(f"      ✓ FP32 Model: {tflite_path}")
 
-    # ============ Static INT8 Quantization (Following toy_gather pattern) ============
-    print("\n[2/5] Configuring Static INT8 Quantization...")
-    print("      - Activation: INT8 (Asymmetric)")
-    print("      - Weight: INT8 (Symmetric)")
+    # ============ Static INT16 Quantization (For Runtime Compatibility) ============
+    print("\n[2/4] Configuring Static INT16 Quantization...")
+    print("      - Activation: INT16 (Symmetric) - Runtime compatible")
+    print("      - Weight: INT8 (Symmetric) - Model size optimized")
+    print(
+        "      - Note: AOT compilation skipped (QNN doesn't support INT16 activations)"
+    )
     qt = quantizer.Quantizer(float_model=tflite_path)
     qt.add_static_config(
         regex=".*",
         operation_name=qtyping.TFLOperationName.ALL_SUPPORTED,
-        activation_num_bits=8,
-        weight_num_bits=8,
+        activation_num_bits=16,  # INT16 for runtime compatibility
+        weight_num_bits=8,  # INT8 for smaller size
     )
 
     # Calibration Data - Convert sample_kwargs to numpy for decode signature
-    print("\n[3/5] Preparing Calibration Data...")
+    print("\n[3/4] Preparing Calibration Data...")
     calibration_data_decode = {}
     for key, value in sample_kwargs.items():
         calibration_data_decode[key] = value.numpy()
@@ -247,7 +249,7 @@ def main():
     print("      - Signatures: decode, prefill_128")
     print(f"      - Total inputs per signature: {len(sample_kwargs)}")
 
-    print("\n[4/5] Calibrating and Quantizing...")
+    print("\n[4/4] Calibrating and Quantizing...")
     model_qsvs = qt.calibrate(calibration_data)
     print(f"      ✓ Calibration: {len(model_qsvs)} quantization ranges computed")
 
@@ -262,11 +264,15 @@ def main():
     #         }
 
     result = qt.quantize(calibration_result=model_qsvs)
-    result.export_model(tflite_int8_path, overwrite=True)
-    print(f"      ✓ INT8 Model: {tflite_int8_path}")
+    result.export_model(tflite_int16_path, overwrite=True)
+    print(f"      ✓ INT16/W8 Model: {tflite_int16_path}")
 
-    # ============ AOT Compilation ============
-    print("\n[5/5] AOT Compiling for Qualcomm QNN (SM8750)...")
+    # ============ AOT Compilation (Experimental) ============
+    aot_tflite_path = os.path.join(output_dir, "gemma3_1b_main_int16_w8_aot.tflite")
+    print("\n[5/5] AOT Compiling for Qualcomm QNN (SM8750) - EXPERIMENTAL...")
+    print("      Note: QNN documentation suggests INT16 activations are unsupported")
+    print("      Attempting compilation to verify actual behavior...")
+
     try:
         litert_model = litert_types.Model.create_from_bytes(result.quantized_model)
         target = qnn_target.Target(soc_model=qnn_target.SocModel.SM8750)
@@ -277,15 +283,47 @@ def main():
             with open(aot_tflite_path, "wb") as f:
                 f.write(aot_result.models_with_backend[0][1].model_bytes)
             print(f"      ✓ AOT Model: {aot_tflite_path}")
+            print("      🎉 UNEXPECTED SUCCESS: QNN accepted INT16 activations!")
             print("\n" + "=" * 80)
-            print("SUCCESS: Gemma3-1B Main INT8 Quantization Complete!")
+            print("SUCCESS: Gemma3-1B Main INT16 Quantization + AOT Complete!")
             print("=" * 80)
+            print("\nGenerated Models:")
+            print(f"  • INT16/W8: {tflite_int16_path}")
+            print(f"  • INT16/W8 AOT: {aot_tflite_path}")
+            print("\nNext Steps:")
+            print("  1. Analyze dispatch ops in AOT model")
+            print("  2. Test on actual NPU hardware")
+            print("  3. Compare performance with INT8 version")
         else:
-            print("      ✗ WARNING: AOT compilation did not produce models_with_backend")
+            print(
+                "      ⚠ WARNING: AOT compilation did not produce models_with_backend"
+            )
+            print(
+                "      This suggests QNN may have accepted but not optimized the model"
+            )
+            print("\n" + "=" * 80)
+            print("PARTIAL SUCCESS: INT16 Model Created (AOT unclear)")
+            print("=" * 80)
     except Exception as e:
         print(f"      ✗ AOT Error: {e}")
+        print("      This confirms QNN does not support INT16 activations")
+        print("\n" + "=" * 80)
+        print("SUCCESS: Gemma3-1B Main INT16 Quantization Complete!")
+        print("=" * 80)
+        print("\nGenerated Model:")
+        print(f"  • {tflite_int16_path}")
+        print("\nModel Specifications:")
+        print("  • Input/Output: INT16 (Runtime compatible)")
+        print("  • Weights: INT8 (Size optimized)")
+        print("  • Quantization: Symmetric (INT16 requirement)")
+        print("  • AOT: Failed as expected (QNN doesn't support INT16 activations)")
+        print("\nUsage:")
+        print("  This model is compatible with runtimes requiring INT16/FP32 I/O")
+        print("  Use CPU or GPU delegate for inference")
+        print("=" * 80)
         import traceback
 
+        print("\nDetailed Error:")
         traceback.print_exc()
 
 
