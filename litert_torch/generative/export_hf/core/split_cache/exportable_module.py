@@ -20,7 +20,6 @@ from litert_torch.generative.export_hf.core import exportable_module as base_exp
 from litert_torch.generative.export_hf.core import utils
 from litert_torch.generative.export_hf.core.split_cache import attention_mask
 from litert_torch.generative.export_hf.core.split_cache import cache as kv_cache_lib
-import numpy as np
 import torch
 from torch import nn
 
@@ -65,9 +64,9 @@ class LiteRTSplitCacheExportableModuleForDecoderOnlyLM(
     ret['inputs_embeds'] = embeddings
 
     ret.update({
-        'position_ids': np.arange(embeddings.shape[1])[None, :],
+        'position_ids': torch.arange(embeddings.shape[1])[None, :],
         'past_key_values': kv_cache,
-        'cache_position': np.arange(embeddings.shape[1]),
+        'cache_position': torch.arange(embeddings.shape[1]),
         'attention_mask': masks,
         # Other common settings
         'use_cache': True,

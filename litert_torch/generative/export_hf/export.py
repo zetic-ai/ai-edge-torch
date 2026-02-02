@@ -33,6 +33,7 @@ def export(
     externalize_embedder: bool = False,
     key_ts_idx: int = 2,
     value_ts_idx: int = 3,
+    split_cache: bool = False,
     auto_model_override: str | None = None,
     # target_accelerator: str | None = None,
     trust_remote_code: bool = False,
@@ -48,6 +49,8 @@ def export(
       auto_model_override=auto_model_override,
   )
   del config  # Unused.
+  if split_cache and not externalize_embedder:
+    raise ValueError('Split cache requires externalize embedder to be enabled.')
   export_config = exportable_module.ExportableModuleConfig(
       batch_size=1,
       prefill_lengths=prefill_lengths,
@@ -61,16 +64,42 @@ def export(
       externalize_embedder=externalize_embedder,
       k_ts_idx=key_ts_idx,
       v_ts_idx=value_ts_idx,
+      split_cache=split_cache,
+      externalize_rope=split_cache,
+      cache_implementation='LiteRTLMSplitCache'
+      if split_cache
+      else 'LiteRTLMCache',
   )
   export_lib.export_text_prefill_decode_model(
       pt_model, text_model_config, export_config, work_dir, quantization_recipe
   )
+  gc.collect()
+  if externalize_embedder:
+    export_lib.export_embedder_model(
+        pt_model,
+        text_model_config,
+        export_config,
+        work_dir,
+        quantization_recipe,
+    )
+  gc.collect()
+  if split_cache:
+    export_lib.export_auxiliary_model(
+        pt_model,
+        text_model_config,
+        export_config,
+        work_dir,
+        quantization_recipe,
+    )
   gc.collect()
   tokenizer_model_path = export_lib.export_tokenizer(tokenizer, work_dir)
   tflite_model_path = os.path.join(
       work_dir,
       'model_quantized.tflite' if quantization_recipe else 'model.tflite',
   )
+  if externalize_embedder or split_cache:
+    # TODO(weiyiw): Add support for packaging models.
+    return
   litert_lm_builder.package_model(
       pt_model,
       tokenizer,

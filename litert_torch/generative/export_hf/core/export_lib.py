@@ -26,6 +26,7 @@ from litert_torch.generative.export_hf.core import exportable_module
 from litert_torch.generative.export_hf.core import patches as _
 from litert_torch.generative.export_hf.core import utils
 from litert_torch.generative.export_hf.core.external_emb import exportable_module as external_emb_module
+from litert_torch.generative.export_hf.core.external_rope import exportable_module as external_rope_module
 from litert_torch.generative.export_hf.core.external_rope import preprocess_model as external_rope_preprocess_model
 from litert_torch.generative.export_hf.core.mu import mu_pass_lib
 from litert_torch.generative.export_hf.core.split_cache import attention as _
@@ -34,6 +35,7 @@ from litert_torch.generative.tools import tokenizer_to_sentencepiece_lib as toke
 from litert_torch.odml_torch.experimental import torch_tfl
 import torch
 import transformers
+
 from ai_edge_quantizer import quantizer as quantizer_lib
 from ai_edge_quantizer import recipe as recipe_lib
 
@@ -332,6 +334,55 @@ def export_embedder_model(
   for recipe in quantization_recipe_list:
     model_path = maybe_quantize_model(model_path, recipe)
     gc.collect()
+  return model_path
+
+
+def export_auxiliary_model(
+    model,
+    text_model_config,
+    export_config: exportable_module.ExportableModuleConfig,
+    work_dir: str,
+    quantization_recipe: str | None = None,
+):
+  """Exports auxiliary model."""
+  del quantization_recipe  # Unused.
+  converter = converter_utils.Converter()
+  # RoPE
+  rope_module = external_rope_module.RoPEEmbedder(model)
+  sample_inputs = rope_module.get_sample_inputs(
+      text_model_config, export_config
+  )
+  for signature_name, (sample_input, _) in sample_inputs.items():
+    converter.add_signature(
+        signature_name,
+        rope_module.eval(),
+        sample_kwargs=sample_input,
+    )
+  # Attention Mask
+  attention_mask_module = split_cache_module.SplitAttentionMaskBuilder(model)
+  sample_inputs = attention_mask_module.get_sample_inputs(
+      text_model_config, export_config
+  )
+  for signature_name, (sample_input, _) in sample_inputs.items():
+    converter.add_signature(
+        signature_name,
+        attention_mask_module.eval(),
+        sample_kwargs=sample_input,
+    )
+  # Cache Update
+  cache_update_module = split_cache_module.CacheUpdate(model)
+  sample_inputs = cache_update_module.get_sample_inputs(
+      text_model_config, export_config
+  )
+  for signature_name, (sample_input, _) in sample_inputs.items():
+    converter.add_signature(
+        signature_name,
+        cache_update_module.eval(),
+        sample_kwargs=sample_input,
+    )
+  lrt_model = converter.convert(strict_export=False)
+  model_path = os.path.join(work_dir, 'auxiliary.tflite')
+  lrt_model.export(model_path)
   return model_path
 
 
