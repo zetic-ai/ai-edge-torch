@@ -71,7 +71,7 @@ class DummyAttentionModule(torch.nn.Module):
     self.scaling = scaling
     self.softcap = softcap
 
-  def forward(self, query, key, value, attention_mask):
+  def forward(self, query, key, value, attention_mask, **kwargs):
     attention_interface = modeling_utils.ALL_ATTENTION_FUNCTIONS[
         self.attention_implementation
     ]
@@ -84,6 +84,7 @@ class DummyAttentionModule(torch.nn.Module):
         attention_mask,
         scaling=self.scaling,
         softcap=self.softcap,
+        **kwargs,
     )[0]
 
 
@@ -139,8 +140,12 @@ class AttentionTest(parameterized.TestCase):
             scaling=scl,
             softcap=scp,
         )
+        attention_kwargs = {
+            'k_ts_idx': 2,
+            'v_ts_idx': 3,
+        }
         expected = attn(query, key, value, mask)
-        actual = test_attn(query, key, value, mask)
+        actual = test_attn(query, key, value, mask, **attention_kwargs)
         self.assertTrue(
             torch.allclose(
                 expected, actual, rtol=1e-2, atol=1e-2, equal_nan=True

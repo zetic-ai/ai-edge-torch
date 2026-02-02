@@ -15,7 +15,10 @@
 """Base class for cache."""
 
 import abc
+from litert_torch.generative.export_hf.core import exportable_module_config
 from transformers import cache_utils
+
+ExportableModuleConfig = exportable_module_config.ExportableModuleConfig
 
 
 class LiteRTLMCacheLayerMixin(cache_utils.CacheLayerMixin, abc.ABC):
@@ -26,10 +29,24 @@ class LiteRTLMCacheLayerMixin(cache_utils.CacheLayerMixin, abc.ABC):
     """Returns the batch size of the cache."""
     ...
 
+  @abc.abstractmethod
+  def get_k_ts_idx(self) -> int:
+    """Returns the index of the sequence dimension in K cache."""
+    ...
+
+  @abc.abstractmethod
+  def get_v_ts_idx(self) -> int:
+    """Returns the index of the sequence dimension in V cache."""
+    ...
+
   @classmethod
   @abc.abstractmethod
   def create_from_config(
-      cls, model_config, layer_index, cache_length, batch_size=1, **kwargs
+      cls,
+      model_config,
+      layer_index,
+      export_config: ExportableModuleConfig,
+      **kwargs
   ) -> "LiteRTLMCacheLayerMixin":
     ...
 
@@ -40,7 +57,7 @@ class LiteRTLMCacheMixin(cache_utils.Cache, abc.ABC):
   @classmethod
   @abc.abstractmethod
   def create_from_config(
-      cls, model_config, cache_length, batch_size=1
+      cls, model_config, export_config: ExportableModuleConfig, **kwargs
   ) -> "LiteRTLMCacheMixin":
     """Creates a KV cache from the model config."""
     ...

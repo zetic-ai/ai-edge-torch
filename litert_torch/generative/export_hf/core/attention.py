@@ -14,11 +14,81 @@
 # ==============================================================================
 """Optimized Attention layer for HuggingFace integration."""
 
-
-from litert_torch.generative.layers import scaled_dot_product_attention as sdpa_lib
+import math
+from typing import Optional
 import jaxtyping as jt
+from litert_torch.generative.custom_ops import bmm_4d as bmm_lib
 import torch
+import torch.nn.functional as F
 import transformers
+
+
+def scaled_dot_product_attention_transposed(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    head_size: int,
+    k_ts_idx: int,
+    v_ts_idx: int,
+    mask: Optional[torch.Tensor] = None,
+    scale: Optional[float] = None,
+    softcap: Optional[float] = None,
+    alibi_bias: Optional[torch.Tensor] = None,
+):
+  """Scaled dot product attention with transposed key and value.
+
+  Args:
+    query: Query tensor, with shape [B, T, N, H].
+    key: Key tensor, with shape [B, T, KV_LEN, H].
+    value: Value tensor, with shape [B, T, H, KV_LEN].
+    head_size (int): head dimension.
+    mask (torch.Tensor): the optional mask tensor.
+    scale (float): the optional scale factor.
+    softcap (float): the optional softcap for the logits.
+    alibi_bias (torch.Tensor): optional alibi bias tensor.
+
+  Returns:
+    The output tensor of scaled_dot_product_attention_transposed.
+  """
+  if scale is None:
+    scale = 1.0 / math.sqrt(head_size)
+
+  if alibi_bias is not None:
+    alibi_bias = alibi_bias * scale
+    if mask is None:
+      mask = alibi_bias
+    else:
+      mask = mask + alibi_bias
+
+  query = query * scale
+
+  assert mask is not None, "Mask should not be None!"
+  t = mask.shape[2]
+  if k_ts_idx == 2:
+    bmm_fn = bmm_lib.bmm_4d
+  else:
+    assert k_ts_idx == 3, "k_ts_idx must be 2 or 3."
+    bmm_fn = lambda x, y: torch.einsum("abth,abhs->abts", x, y)
+  logits = bmm_fn(query, key)
+
+  _, bk, gt, s = logits.shape
+  g = gt // t
+  logits = logits.reshape((bk, g, t, s))
+  if softcap is not None:
+    logits = torch.tanh(logits / softcap)
+    logits = logits * softcap
+
+  padded_logits = logits + mask
+  padded_logits = padded_logits.reshape(1, bk, gt, s)
+  probs = F.softmax(padded_logits, dim=-1).type_as(key)
+  if v_ts_idx == 3:
+    bmm_fn = bmm_lib.bmm_4d
+  else:
+    assert v_ts_idx == 2, "v_ts_idx must be 2 or 3."
+    bmm_fn = lambda x, y: torch.einsum("abts,absh->abth", x, y)
+  encoded = bmm_fn(probs, value)
+
+  return encoded  # 1, bk, gt, h
 
 
 def transposed_attention(
@@ -46,20 +116,28 @@ def transposed_attention(
   Returns:
     The attention output tensor.
   """
-  del kwargs  # Unused in this implementation but required by the interface.
 
   b, n, seq_len, h = query.shape
   g = getattr(module, "num_key_value_groups", 1)
   num_query_groups = n // g
   # bnth -> b(kg)th -> 1(bk)(gt)h
   query = query.reshape(1, b * num_query_groups, g * seq_len, h)
+  key_ts_idx: int | None = kwargs.get("k_ts_idx", None)
+  value_ts_idx: int | None = kwargs.get("v_ts_idx", None)
+  if key_ts_idx is None or value_ts_idx is None:
+    raise ValueError(
+        "Timestamp indices not passed to attention module. The model is not"
+        " passing the kwargs correctly."
+    )
 
   # 1, bk, gt, h
-  sdpa_out = sdpa_lib.scaled_dot_product_attention_transposed(
-      query,
-      key,
-      value,
-      h,
+  sdpa_out = scaled_dot_product_attention_transposed(
+      query=query,
+      key=key,
+      value=value,
+      head_size=h,
+      k_ts_idx=key_ts_idx,
+      v_ts_idx=value_ts_idx,
       mask=attention_mask,
       scale=scaling,
       softcap=softcap,

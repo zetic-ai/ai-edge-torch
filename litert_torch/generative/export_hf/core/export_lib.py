@@ -174,12 +174,10 @@ def export_text_prefill_decode_model(
   prefill_module_cls, decode_module_cls = get_prefill_decode_exportable_cls(
       export_config
   )
-  prefill_module = prefill_module_cls(model)
-  decode_module = decode_module_cls(model)
+  prefill_module = prefill_module_cls(model, export_config)
+  decode_module = decode_module_cls(model, export_config)
   converter = converter_utils.Converter()
-  sample_prefill_inputs = prefill_module.get_sample_inputs(
-      text_model_config, export_config
-  )
+  sample_prefill_inputs = prefill_module.get_sample_inputs(text_model_config)
   for signature_name, (
       sample_prefill_inputs,
       prefill_dynamic_shapes,
@@ -213,7 +211,7 @@ def export_text_prefill_decode_model(
           sample_kwargs=sample_prefill_inputs,
       )
   sample_decode_inputs, decode_dynamic_shapes = decode_module.get_sample_inputs(
-      text_model_config, export_config
+      text_model_config
   )['decode']
   if has_dynamic_shape:
     print('Exporting decode_module...')

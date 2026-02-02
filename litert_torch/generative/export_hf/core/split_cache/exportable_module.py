@@ -14,6 +14,7 @@
 # ==============================================================================
 """Exportable module for split cache attention models."""
 
+import copy
 from litert_torch.generative.export_hf.core import cache as base_cache_lib
 from litert_torch.generative.export_hf.core import exportable_module as base_exportable_module
 from litert_torch.generative.export_hf.core import utils
@@ -164,6 +165,7 @@ class LiteRTSplitCacheExportableModuleForDecoderOnlyLMPrefill(
         mask,
         kv_cache,
     )
+    inputs |= self.attention_kwargs()
     output = self.model(**inputs)
     output_cache = output.past_key_values
     return self.post_process_kv_cache(output_cache)
@@ -171,9 +173,9 @@ class LiteRTSplitCacheExportableModuleForDecoderOnlyLMPrefill(
   def get_sample_inputs(
       self,
       model_config,
-      export_config: base_exportable_module.ExportableModuleConfig,
   ):
-    kv_cache_inputs, _ = self.get_sample_kv_cache(model_config, export_config)
+    export_config = self.export_config
+    kv_cache_inputs, _ = self.get_sample_kv_cache(model_config)
 
     sample_inputs = {}
     for prefill_length in export_config.prefill_lengths:
@@ -207,6 +209,7 @@ class LiteRTSplitCacheExportableModuleForDecoderOnlyLMGenerate(
         mask,
         kv_cache,
     )
+    inputs |= self.attention_kwargs()
     output = self.model(**inputs)
     output_cache = output.past_key_values
     ret = self.post_process_kv_cache(output_cache)
@@ -216,9 +219,9 @@ class LiteRTSplitCacheExportableModuleForDecoderOnlyLMGenerate(
   def get_sample_inputs(
       self,
       model_config,
-      export_config: base_exportable_module.ExportableModuleConfig,
   ):
-    kv_cache_inputs, _ = self.get_sample_kv_cache(model_config, export_config)
+    export_config = self.export_config
+    kv_cache_inputs, _ = self.get_sample_kv_cache(model_config)
     sample_inputs = {
         **kv_cache_inputs,
         **self._get_input(
@@ -322,13 +325,20 @@ class CacheUpdate(torch.nn.Module):
     return {'kv_cache': kv_cache}
 
   @classmethod
-  def _get_input(cls, model_config, input_length, cache_length, batch_size=1):
+  def _get_input(
+      cls,
+      model_config,
+      input_length,
+      export_config: base_exportable_module.ExportableModuleConfig,
+  ):
     """Gets sample inputs for the model."""
     kv_cache = base_cache_lib.LiteRTLMCache.create_from_config(
-        model_config, cache_length, batch_size, reverse_kv=True
+        model_config, export_config
     )
+    slice_export_config = copy.deepcopy(export_config)
+    slice_export_config.cache_length = input_length
     kv_slice = base_cache_lib.LiteRTLMCache.create_from_config(
-        model_config, input_length, batch_size, reverse_kv=True
+        model_config, slice_export_config
     )
     return {
         'kv_cache': kv_cache,
@@ -348,15 +358,13 @@ class CacheUpdate(torch.nn.Module):
       inputs = cls._get_input(
           model_config,
           prefill_length,
-          export_config.cache_length,
-          export_config.batch_size,
+          export_config,
       )
       sample_inputs[f'prefill_cache_update_{prefill_length}'] = (inputs, {})
     decode_inputs = cls._get_input(
         model_config,
         1,
-        export_config.cache_length,
-        export_config.batch_size,
+        export_config,
     )
     sample_inputs['decode_cache_update'] = (decode_inputs, {})
     return sample_inputs

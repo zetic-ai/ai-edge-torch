@@ -30,7 +30,9 @@ def export(
     cache_length=4096,
     quantization_recipe: str = 'dynamic_wi8_afp32',
     enable_dynamic_shape: bool = False,
-    # externalize_embedder: bool = False,
+    externalize_embedder: bool = False,
+    key_ts_idx: int = 2,
+    value_ts_idx: int = 3,
     auto_model_override: str | None = None,
     # target_accelerator: str | None = None,
     trust_remote_code: bool = False,
@@ -56,7 +58,9 @@ def export(
       cache_length_dim=torch.export.Dim('cache_length')
       if enable_dynamic_shape
       else None,
-      externalize_embedder=False,
+      externalize_embedder=externalize_embedder,
+      k_ts_idx=key_ts_idx,
+      v_ts_idx=value_ts_idx,
   )
   export_lib.export_text_prefill_decode_model(
       pt_model, text_model_config, export_config, work_dir, quantization_recipe

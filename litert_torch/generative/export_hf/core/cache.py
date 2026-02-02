@@ -25,18 +25,30 @@ Shape annotations used here:
 """
 
 from typing import Any, List, Optional, Tuple
-import litert_torch.generative.custom_ops.dynamic_update_slice as tfl_dus
-import litert_torch.generative.export_hf.core.cache_base as cache_base_lib
+
 import jaxtyping as jt
+import litert_torch.generative.custom_ops.dynamic_update_slice as tfl_dus
+from litert_torch.generative.export_hf.core import exportable_module_config
+import litert_torch.generative.export_hf.core.cache_base as cache_base_lib
 import torch
 import torch.utils._pytree as pytree
 
+ExportableModuleConfig = exportable_module_config.ExportableModuleConfig
+
 
 # Shape annotations for the cache entries.
-KeyCache = jt.Shaped[torch.Tensor, "1 BK S H"]
-KeySlice = jt.Shaped[torch.Tensor, "1 BK T H"]
-ValueCache = jt.Shaped[torch.Tensor, "1 BK H S"]
-ValueSlice = jt.Shaped[torch.Tensor, "1 BK H T"]
+KeyCache = (
+    jt.Shaped[torch.Tensor, "1 BK S H"] | jt.Shaped[torch.Tensor, "1 BK H S"]
+)
+KeySlice = (
+    jt.Shaped[torch.Tensor, "1 BK T H"] | jt.Shaped[torch.Tensor, "1 BK H T"]
+)
+ValueCache = (
+    jt.Shaped[torch.Tensor, "1 BK H S"] | jt.Shaped[torch.Tensor, "1 BK S H"]
+)
+ValueSlice = (
+    jt.Shaped[torch.Tensor, "1 BK H T"] | jt.Shaped[torch.Tensor, "1 BK T H"]
+)
 
 
 def _get_slice_indices(
@@ -77,15 +89,11 @@ def _update_kv_impl(
     k_slice: KeySlice,
     v_slice: ValueSlice,
     cache_position: jt.Int32[torch.Tensor, "T"],
-    reverse_kv: bool = False,
+    k_ts_idx: int,
+    v_ts_idx: int,
 ):
   """Updates the cache buffer using tfl.dynamic_update_slice."""
   cache_dim = 4
-  k_ts_idx = 2  # K Cache shape is 1 BK S H
-  v_ts_idx = 3  # V Cache shape is 1 BK H S
-  if reverse_kv:
-    k_ts_idx = 3  # K Cache shape is 1 BK H S
-    v_ts_idx = 2  # V Cache shape is 1 BK S H
   positions = cache_position[0]  # The position of the first input token.
   k_slice_indices = _get_slice_indices(positions.clone(), cache_dim, k_ts_idx)
   v_slice_indices = _get_slice_indices(positions.clone(), cache_dim, v_ts_idx)
@@ -109,33 +117,38 @@ class LiteRTLMCacheLayer(cache_base_lib.LiteRTLMCacheLayerMixin):
       key_cache: KeyCache,
       value_cache: ValueCache,
       batch_size: int = 1,
-      reverse_kv: bool = False,
+      k_ts_idx: int = 2,
+      v_ts_idx: int = 3,
       **kwargs,
   ):
     super().__init__()
     self.keys = key_cache
     self.values = value_cache
-    self.reverse_kv = reverse_kv
+    self.k_ts_idx = k_ts_idx  # The index of the sequence dimension in K cache.
+    self.v_ts_idx = v_ts_idx  # The index of the sequence dimension in V cache.
+    assert k_ts_idx in [2, 3]
+    assert v_ts_idx in [2, 3]
     self.is_initialized = True
 
     self.k_cache_shape = self.keys.shape
     self.v_cache_shape = self.values.shape
-    self.max_cache_len = (
-        self.v_cache_shape[2] if reverse_kv else self.k_cache_shape[2]
-    )
+    self.max_cache_len = self.v_cache_shape[self.v_ts_idx]
     self.batch_size = batch_size
-    self.num_key_value_heads = (
-        self.v_cache_shape[1] if reverse_kv else self.k_cache_shape[1]
-    ) // self.batch_size
-    self.head_dim = (
-        self.v_cache_shape[3] if reverse_kv else self.k_cache_shape[3]
-    )
+    v_head_dim_idx = 3 if self.v_ts_idx == 2 else 2
+    self.head_dim = self.v_cache_shape[v_head_dim_idx]
+
     self.additional_states = kwargs.get("additional_states", None)
 
     self.cumulative_length = 0
 
   def get_batch_size(self) -> int:
     return self.batch_size
+
+  def get_k_ts_idx(self) -> int:
+    return self.k_ts_idx
+
+  def get_v_ts_idx(self) -> int:
+    return self.v_ts_idx
 
   def lazy_initialization(self, key_states: torch.Tensor):
     # Since we don't support real lazy initialization, this function could only
@@ -162,13 +175,24 @@ class LiteRTLMCacheLayer(cache_base_lib.LiteRTLMCacheLayerMixin):
     value_states = value_states.to(self.values.dtype)
 
     if not cache_kwargs.get("kv_slice_preprocessed", False):
-      assert not self.reverse_kv, "Reverse KV is not supported."
-      key_states = key_states.reshape(
-          1, -1, seq_len, self.head_dim
-      )  # 1, bk, s, h
-      value_states = value_states.permute(0, 1, 3, 2).reshape(
-          1, -1, self.head_dim, seq_len
-      )  # 1, bk, h, s
+      if self.k_ts_idx == 3:
+        key_target_shape = (1, -1, self.head_dim, seq_len)
+        key_states = key_states.permute(0, 1, 3, 2).reshape(*key_target_shape)
+      elif self.k_ts_idx == 2:
+        key_target_shape = (1, -1, seq_len, self.head_dim)
+        key_states = key_states.reshape(*key_target_shape)
+      else:
+        raise ValueError(f"Unsupported k_ts_idx: {self.k_ts_idx}")
+      if self.v_ts_idx == 3:
+        value_target_shape = (1, -1, self.head_dim, seq_len)
+        value_states = value_states.permute(0, 1, 3, 2).reshape(
+            *value_target_shape
+        )
+      elif self.v_ts_idx == 2:
+        value_target_shape = (1, -1, seq_len, self.head_dim)
+        value_states = value_states.reshape(*value_target_shape)
+      else:
+        raise ValueError(f"Unsupported v_ts_idx: {self.v_ts_idx}")
 
     cache_position: jt.Int32[torch.Tensor, "T"] = cache_kwargs.get(
         "cache_position"
@@ -182,7 +206,8 @@ class LiteRTLMCacheLayer(cache_base_lib.LiteRTLMCacheLayerMixin):
         key_states,
         value_states,
         cache_position,
-        self.reverse_kv,
+        self.k_ts_idx,
+        self.v_ts_idx,
     )
     return self.keys, self.values
 
@@ -203,32 +228,52 @@ class LiteRTLMCacheLayer(cache_base_lib.LiteRTLMCacheLayerMixin):
       cls,
       model_config,
       layer_index,
-      cache_length,
-      batch_size=1,
-      reverse_kv=False,
+      export_config: ExportableModuleConfig,
   ):
     """Infers the KV cache shape from the model config."""
     del layer_index  # Unused.
+    cache_length = export_config.cache_length
+    batch_size = export_config.batch_size
+    k_ts_idx = export_config.k_ts_idx
+    v_ts_idx = export_config.v_ts_idx
     num_kv_heads = model_config.num_key_value_heads
     embed_size_per_head = (
         getattr(model_config, "head_dim", None)
         or model_config.hidden_size // model_config.num_attention_heads
     )
 
-    k_cache_shape = (
-        1,
-        batch_size * num_kv_heads,
-        cache_length,
-        embed_size_per_head,
-    )
-    v_cache_shape = (
-        1,
-        batch_size * num_kv_heads,
-        embed_size_per_head,
-        cache_length,
-    )
-    if reverse_kv:
-      k_cache_shape, v_cache_shape = v_cache_shape, k_cache_shape
+    if k_ts_idx == 2:
+      k_cache_shape = (
+          1,
+          batch_size * num_kv_heads,
+          cache_length,
+          embed_size_per_head,
+      )
+    elif k_ts_idx == 3:
+      k_cache_shape = (
+          1,
+          batch_size * num_kv_heads,
+          embed_size_per_head,
+          cache_length,
+      )
+    else:
+      raise ValueError(f"Unsupported k_ts_idx: {k_ts_idx}")
+    if v_ts_idx == 2:
+      v_cache_shape = (
+          1,
+          batch_size * num_kv_heads,
+          cache_length,
+          embed_size_per_head,
+      )
+    elif v_ts_idx == 3:
+      v_cache_shape = (
+          1,
+          batch_size * num_kv_heads,
+          embed_size_per_head,
+          cache_length,
+      )
+    else:
+      raise ValueError(f"Unsupported v_ts_idx: {v_ts_idx}")
     return k_cache_shape, v_cache_shape
 
   @classmethod
@@ -236,18 +281,22 @@ class LiteRTLMCacheLayer(cache_base_lib.LiteRTLMCacheLayerMixin):
       cls,
       model_config,
       layer_index,
-      cache_length,
-      batch_size=1,
-      reverse_kv=False,
+      export_config: ExportableModuleConfig,
       **kwargs,
   ) -> "LiteRTLMCacheLayer":
     """Creates a KV cache from the model config."""
     k_cache_shape, v_cache_shape = cls._infer_cache_shape_from_config(
-        model_config, layer_index, cache_length, batch_size, reverse_kv
+        model_config, layer_index, export_config
     )
     keys = torch.zeros(k_cache_shape, dtype=torch.float32)
     values = torch.zeros(v_cache_shape, dtype=torch.float32)
-    return cls(keys, values, reverse_kv=reverse_kv, **kwargs)
+    return cls(
+        keys,
+        values,
+        k_ts_idx=export_config.k_ts_idx,
+        v_ts_idx=export_config.v_ts_idx,
+        **kwargs,
+    )
 
 
 @cache_base_lib.register_cache_implementation
@@ -258,9 +307,7 @@ class LiteRTLMCache(cache_base_lib.LiteRTLMCacheMixin):
   def create_from_config(
       cls,
       model_config,
-      cache_length,
-      batch_size=1,
-      reverse_kv=False,
+      export_config: ExportableModuleConfig,
       **kwargs,
   ) -> "LiteRTLMCache":
     """Creates a KV cache from the model config."""
@@ -271,9 +318,8 @@ class LiteRTLMCache(cache_base_lib.LiteRTLMCacheMixin):
           LiteRTLMCacheLayer.create_from_config(
               model_config,
               layer_index,
-              cache_length,
-              batch_size=batch_size,
-              reverse_kv=reverse_kv,
+              export_config,
+              **kwargs,
           )
       )
     return cls(layers)
@@ -281,7 +327,7 @@ class LiteRTLMCache(cache_base_lib.LiteRTLMCacheMixin):
 
 def _flatten_kvc_t(
     kvc: LiteRTLMCache,
-) -> Tuple[List[torch.Tensor], Tuple[List[str], Tuple[int, int, bool]]]:
+) -> Tuple[List[torch.Tensor], Tuple[List[str], Tuple[int, int, int, int]]]:
   """Flattens the cache into a list of tensors."""
   flattened = []
   flat_names = []
@@ -289,22 +335,23 @@ def _flatten_kvc_t(
   layer_0 = kvc.layers[0]
   assert isinstance(layer_0, cache_base_lib.LiteRTLMCacheLayerMixin)
   batch_size = layer_0.get_batch_size()
-  reverse_kv = getattr(layer_0, "reverse_kv", False)
+  k_ts_idx = layer_0.get_k_ts_idx()
+  v_ts_idx = layer_0.get_v_ts_idx()
   for i, layer in enumerate(kvc.layers):
     flattened.append(layer.keys)
     flat_names.append(f"k_{i}")
     flattened.append(layer.values)
     flat_names.append(f"v_{i}")
-  return flattened, (flat_names, (batch_size, num_layers, reverse_kv))
+  return flattened, (flat_names, (batch_size, num_layers, k_ts_idx, v_ts_idx))
 
 
 def _unflatten_kvc_t(
     values: List[torch.Tensor],
-    context: Tuple[List[str], Tuple[int, int, bool]],
+    context: Tuple[List[str], Tuple[int, int, int, int]],
 ) -> LiteRTLMCache:
   """Unflattens the cache from a list of tensors."""
   flat_names = context[0]
-  batch_size, num_layers, reverse_kv = context[1]
+  batch_size, num_layers, k_ts_idx, v_ts_idx = context[1]
   layers = []
   for i in range(num_layers):
     k_cache_idx = flat_names.index(f"k_{i}")
@@ -314,7 +361,8 @@ def _unflatten_kvc_t(
             key_cache=values[k_cache_idx],
             value_cache=values[v_cache_idx],
             batch_size=batch_size,
-            reverse_kv=reverse_kv,
+            k_ts_idx=k_ts_idx,
+            v_ts_idx=v_ts_idx,
         )
     )
   obj = LiteRTLMCache(layers)

@@ -15,38 +15,35 @@
 """Exportable modules."""
 
 import abc
-import dataclasses
 from litert_torch.generative.export_hf.core import cache as _
 from litert_torch.generative.export_hf.core import cache_base as kv_cache_lib
+from litert_torch.generative.export_hf.core import exportable_module_config
 from litert_torch.generative.export_hf.core import utils
 import torch
 
 
-@dataclasses.dataclass
-class ExportableModuleConfig:
-  """Config for exportable modules."""
-
-  batch_size: int = 1
-  cache_length: int = 1280
-  prefill_lengths: list[int] = dataclasses.field(default_factory=lambda: [128])
-  # For dynamic shape
-  cache_length_dim: torch.export.Dim | None = None
-  prefill_length_dim: torch.export.Dim | None = None
-
-  # Export configs
-  externalize_embedder: bool = False
-  externalize_rope: bool = False
-  split_cache: bool = False
-
-  cache_implementation: str = "LiteRTLMCache"
+ExportableModuleConfig = exportable_module_config.ExportableModuleConfig
 
 
 class ExportableModuleBase(torch.nn.Module, abc.ABC):
   """Base class for exportable modules."""
 
+  def __init__(self, export_config: ExportableModuleConfig):
+    super().__init__()
+    self._export_config = export_config
+
+  @property
+  def export_config(self) -> ExportableModuleConfig:
+    return self._export_config
+
+  def attention_kwargs(self):
+    k_ts_idx = self.export_config.k_ts_idx
+    v_ts_idx = self.export_config.v_ts_idx
+    return {"k_ts_idx": k_ts_idx, "v_ts_idx": v_ts_idx}
+
   @abc.abstractmethod
   def get_sample_inputs(
-      self, model_config, export_config: ExportableModuleConfig
+      self, model_config
   ) -> dict[str, tuple[dict[str, torch.Tensor], dict[str, torch.export.Dim]]]:
     """Returns the sample inputs for the model."""
     ...
@@ -55,8 +52,10 @@ class ExportableModuleBase(torch.nn.Module, abc.ABC):
 class LiteRTExportableModuleForDecoderOnlyLM(ExportableModuleBase):
   """Base class for exportable modules for decoder-only LM."""
 
-  def __init__(self, model: torch.nn.Module):
-    super().__init__()
+  def __init__(
+      self, model: torch.nn.Module, export_config: ExportableModuleConfig
+  ):
+    super().__init__(export_config)
     self.model = model
 
   def adapt_inputs(
@@ -108,16 +107,13 @@ class LiteRTExportableModuleForDecoderOnlyLM(ExportableModuleBase):
     })
     return ret
 
-  def get_sample_kv_cache(
-      self, model_config, export_config: ExportableModuleConfig
-  ):
+  def get_sample_kv_cache(self, model_config):
     """Returns the input sample KV cache for the model."""
+    export_config = self.export_config
     num_layers = model_config.num_hidden_layers
-    batch_size = export_config.batch_size
-    cache_length = export_config.cache_length
     kv_cache = kv_cache_lib.CACHE_REGISTRY[
         export_config.cache_implementation
-    ].create_from_config(model_config, cache_length, batch_size)
+    ].create_from_config(model_config, export_config)
     inputs = {"kv_cache": kv_cache}
     if export_config.cache_length_dim is not None:
       all_k_shapes = tuple(
@@ -150,6 +146,7 @@ class LiteRTExportableModuleForDecoderOnlyLMPrefill(
       mask,
   ):
     inputs = self.adapt_inputs(tokens, None, input_pos, kv_cache, mask)
+    inputs |= self.attention_kwargs()
     output = self.model(**inputs)
     return {"kv_cache": output.past_key_values}
 
@@ -165,11 +162,10 @@ class LiteRTExportableModuleForDecoderOnlyLMPrefill(
     )
     return tokens, tokens_dynamic_shape
 
-  def get_sample_inputs(
-      self, model_config, export_config: ExportableModuleConfig
-  ):
+  def get_sample_inputs(self, model_config):
+    export_config = self.export_config
     kv_cache_inputs, kv_cache_dynamic_shapes = self.get_sample_kv_cache(
-        model_config, export_config
+        model_config
     )
     batch_size = export_config.batch_size
     cache_length = export_config.cache_length
@@ -218,6 +214,7 @@ class LiteRTExportableModuleForDecoderOnlyLMGenerate(
       mask,
   ):
     inputs = self.adapt_inputs(tokens, None, input_pos, kv_cache, mask)
+    inputs |= self.attention_kwargs()
     output = self.model(**inputs)
     return {"kv_cache": output.past_key_values, "logits": output.logits}
 
@@ -231,11 +228,10 @@ class LiteRTExportableModuleForDecoderOnlyLMGenerate(
     tokens_dynamic_shape = {"tokens": None} if decode_length_dim else {}
     return tokens, tokens_dynamic_shape
 
-  def get_sample_inputs(
-      self, model_config, export_config: ExportableModuleConfig
-  ):
+  def get_sample_inputs(self, model_config):
+    export_config = self.export_config
     kv_cache_inputs, kv_cache_dynamic_shapes = self.get_sample_kv_cache(
-        model_config, export_config
+        model_config
     )
     batch_size = export_config.batch_size
     cache_length = export_config.cache_length
