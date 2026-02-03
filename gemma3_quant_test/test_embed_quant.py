@@ -10,17 +10,17 @@ VOCAB_SIZE = 262144
 EMBED_DIM = 1152
 
 
-class GatherEmbed(nn.Module):
+class EmbedModel(nn.Module):
     def __init__(self):
         super().__init__()
-        self.weight = nn.Parameter(torch.randn(VOCAB_SIZE, EMBED_DIM))
+        self.emb = nn.Embedding(VOCAB_SIZE, EMBED_DIM)
 
     def forward(self, input):
-        return self.weight[input]
+        return self.emb(input)
 
 
 def test_embed_quant():
-    model = GatherEmbed().eval()
+    model = EmbedModel().eval()
     tflite_path = "test_embed_fp32.tflite"
     quant_path = "test_embed_w4.tflite"
 
@@ -29,12 +29,7 @@ def test_embed_quant():
 
     qt = quantizer.Quantizer(float_model=tflite_path)
     op_config = qtyping.OpQuantizationConfig(
-        activation_tensor_config=qtyping.TensorQuantizationConfig(
-            num_bits=16,
-            symmetric=True,
-            granularity=qtyping.QuantGranularity.TENSORWISE,
-            dtype=qtyping.TensorDataType.INT,
-        ),
+        activation_tensor_config=None,
         weight_tensor_config=qtyping.TensorQuantizationConfig(
             num_bits=4,
             symmetric=True,
@@ -45,7 +40,9 @@ def test_embed_quant():
         explicit_dequantize=False,
     )
     qt.update_quantization_recipe(
-        regex=".*", operation_name=qtyping.TFLOperationName.GATHER, op_config=op_config
+        regex=".*",
+        operation_name=qtyping.TFLOperationName.EMBEDDING_LOOKUP,
+        op_config=op_config,
     )
 
     calib = {"main": [{"args_0": np.zeros((1, 1), dtype=np.int32)}]}
