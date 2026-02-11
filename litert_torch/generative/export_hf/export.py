@@ -40,6 +40,7 @@ def export(
     trust_remote_code: bool = False,
     use_jinja_template: bool = False,
     task: str = 'text_generation',
+    bundle_litert_lm: bool = True,
 ):
   """Exports HuggingFace Transformers model to tflite."""
   # TODO(weiyiw): Use tmp dir for work_dir.
@@ -104,13 +105,14 @@ def export(
   if externalize_embedder or split_cache:
     # TODO(weiyiw): Add support for packaging models.
     return
-  litert_lm_builder.package_model(
-      pt_model,
-      tokenizer,
-      tflite_model_path,
-      tokenizer_model_path,
-      cache_length,
-      work_dir,
-      output_dir,
-      use_jinja_template,
-  )
+  if bundle_litert_lm:
+    litert_lm_builder.package_model(
+        pt_model,
+        tokenizer,
+        tflite_model_path,
+        tokenizer_model_path,
+        cache_length,
+        work_dir,
+        output_dir,
+        use_jinja_template,
+    )
