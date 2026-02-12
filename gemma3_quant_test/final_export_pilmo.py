@@ -11,6 +11,7 @@ from ai_edge_quantizer import qtyping, quantizer
 import ai_edge_torch
 from ai_edge_torch.generative.examples.gemma3 import decoder
 
+# work
 # ==============================================================================
 # MODEL CONFIG
 # ==============================================================================
@@ -187,10 +188,36 @@ class Gemma3Decode(Gemma3Base):
 # ==============================================================================
 # SAMPLES & MAIN
 # ==============================================================================
+REAL_EMBED_WEIGHTS = None
+
+
 def generate_sample(T, to_numpy=True):
+    global REAL_EMBED_WEIGHTS
+    output_dir = "gemma3_quant_test/output"
+    weight_path = os.path.join(output_dir, "real_embed_weight.pt")
+
+    if REAL_EMBED_WEIGHTS is None:
+        if os.path.exists(weight_path):
+            print(
+                f"Loading real embedding weights for calibration from {weight_path}..."
+            )
+            REAL_EMBED_WEIGHTS = torch.load(weight_path)
+        else:
+            print(
+                "WARNING: real_embed_weight.pt not found. Using randn for calibration."
+            )
+
+    if REAL_EMBED_WEIGHTS is not None:
+        # Sample random tokens from the real weight table
+        indices = torch.randint(0, REAL_EMBED_WEIGHTS.shape[0], (1, T))
+        embeddings = REAL_EMBED_WEIGHTS[indices]  # Shape [1, T, EMBED_DIM]
+    else:
+        # Fallback to randn
+        embeddings = torch.randn((1, T, EMBED_DIM))
+
     mask_len = KV_CACHE_LEN + T
     sample = {
-        "embeddings": torch.randn((1, T, EMBED_DIM)),
+        "embeddings": embeddings,
         "mask_global": torch.zeros((1, 1, T, mask_len)),
         "mask_local": torch.zeros((1, 1, T, mask_len)),
         "pos_emb_cos": torch.randn((1, T, 1, HEAD_DIM)),
