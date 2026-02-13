@@ -16,6 +16,7 @@
 
 import math
 from typing import Any
+from litert_torch import _config
 from litert_torch.backend import lowerings
 from litert_torch.backend.lowerings import utils as lowering_utils
 from ai_edge_litert.mlir import ir
@@ -24,8 +25,7 @@ import numpy as np
 import torch
 from ai_edge_litert.mlir._mlir_libs import converter_api_ext
 
-LAZY_CONSTANTS_NUMEL_THRESHOLD = 1024 * 1024  # 1MB
-LAZY_CONSTANTS_GETTER_CHUNK_SIZE = 64 * 1024 * 1024  # 64MB
+config = _config.config
 
 
 def _tensor_fingerprint(tensor: torch.Tensor) -> int:
@@ -145,7 +145,7 @@ def get_tensor_lowering_placeholder(
       use_lazy_attr = False
 
     # If the tensor is too small, just use a dense elements attr.
-    if x.numel() * x.element_size() < LAZY_CONSTANTS_NUMEL_THRESHOLD:
+    if x.numel() * x.element_size() < config.lazy_constant_numel_threshold:
       use_lazy_attr = False
 
     # If not using lazy attr, clamp inf values to the min/max value of the
@@ -170,7 +170,9 @@ def get_tensor_lowering_placeholder(
       def chunk_iterator_factory():
         nonlocal x
         element_size = x.element_size()
-        elements_per_chunk = LAZY_CONSTANTS_GETTER_CHUNK_SIZE // element_size
+        elements_per_chunk = (
+            config.lazy_constant_getter_chunk_size // element_size
+        )
 
         # x.view(-1) is a metadata-only operation (0 bytes allocated)
         flat_x = x.view(-1)

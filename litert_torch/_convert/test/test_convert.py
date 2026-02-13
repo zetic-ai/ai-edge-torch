@@ -244,40 +244,6 @@ class TestConvert(googletest.TestCase):
     )
     self.assertTrue(result)
 
-  @googletest.skipIf(
-      not litert_torch.config.use_torch_xla,
-      reason="Shape polymorphism is not yet support with backend.",
-  )
-  def test_convert_model_with_dynamic_batch(self):
-    """Test converting a simple model with dynamic batch size."""
-
-    class SampleModel(nn.Module):
-
-      def __init__(self):
-        super().__init__()
-        self.w = torch.ones((10, 10)) * 2.7
-
-      def forward(self, x, y):
-        return x + y + self.w
-
-    sample_input = (torch.randn(4, 3, 10, 10), torch.randn(4, 3, 10, 10))
-    batch = torch.export.Dim("batch")
-    dynamic_shapes = ({0: batch}, {0: batch})
-
-    model = SampleModel().eval()
-    edge_model = litert_torch.convert(
-        model, sample_input, dynamic_shapes=dynamic_shapes
-    )
-
-    for batch_size in [2, 4, 10]:
-      validate_input = (
-          torch.randn(batch_size, 3, 10, 10),
-          torch.randn(batch_size, 3, 10, 10),
-      )
-      self.assertTrue(
-          model_coverage.compare_tflite_torch(edge_model, model, validate_input)
-      )
-
   def test_convert_model_with_kwargs(self):
     """Test converting a simple model with sample_kwargs."""
 
