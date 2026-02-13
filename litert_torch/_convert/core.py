@@ -73,7 +73,7 @@ def convert_signatures(
     *,
     strict_export: Union[Literal["auto"], bool] = False,
     quant_config: Optional[qcfg.QuantConfig] = None,
-    convert_with_lazy_constants: bool = False,
+    lightweight_conversion: bool = False,
 ) -> model.TfLiteModel:
   """Converts a list of `signature.Signature`s and embeds them into one `model.TfLiteModel`.
 
@@ -86,10 +86,12 @@ def convert_signatures(
         strict_export="auto", the function will try to export module in both
         modes and use the first one succeeds for downstream conversion.
       quant_config: User-defined quantization method and scheme of the model.
-      convert_with_lazy_constants: (Experimental) If true, holds constants
-        lazily during conversion. This can significantly reduce the memory usage
-        and conversion time when converting large models. However, some constant
-        folding and optimizations may be disabled.
+      lightweight_conversion: (Experimental) If True, prioritizes a faster
+        conversion process and a reduced memory footprint. This is achieved by
+        handling constants lazily during the conversion phase, making it ideal
+        for large models that might otherwise hit memory limits. Note that
+        enabling this mode may bypass certain graph optimizations, such as
+        constant folding, in the resulting model.
 
   Returns:
     The converted `model.TfLiteModel` object.
@@ -140,7 +142,7 @@ def convert_signatures(
       exported_programs,
       signatures,
       quant_config=quant_config,
-      convert_with_lazy_constants=convert_with_lazy_constants,
+      lightweight_conversion=lightweight_conversion,
   )
 
   return model.TfLiteModel(exporter)

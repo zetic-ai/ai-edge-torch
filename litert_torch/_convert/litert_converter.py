@@ -85,7 +85,7 @@ def exported_programs_to_flatbuffer(
     signatures: list[signature.Signature],
     *,
     quant_config: qcfg.QuantConfig | None = None,
-    convert_with_lazy_constants: bool = False,
+    lightweight_conversion: bool = False,
 ) -> LazyModelExporter:
   """Convert ExportedPrograms to a LiteRT model."""
   if not exported_programs:
@@ -107,7 +107,7 @@ def exported_programs_to_flatbuffer(
     inline_consts_lib.inline_consts(
         exported_program,
         constant_cache=constant_cache,
-        enable_lazy_constants=convert_with_lazy_constants,
+        enable_lazy_constants=lightweight_conversion,
     )
 
   lowered_programs = []

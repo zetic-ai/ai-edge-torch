@@ -134,7 +134,7 @@ class Converter:
       strict_export: Union[Literal["auto"], bool] = False,
       quant_config: Optional[qcfg.QuantConfig] = None,
       dynamic_shapes: Optional[Union[dict[str, Any], Tuple[Any, ...]]] = None,
-      convert_with_lazy_constants: bool = False,
+      lightweight_conversion: bool = False,
   ) -> model.TfLiteModel | litert_types.CompilationResult:
     """Finalizes the conversion and produces an edge model.
 
@@ -163,10 +163,12 @@ class Converter:
         specifications for each input in original order. See
         https://pytorch.org/docs/stable/export.html#expressing-dynamism for more
           details.
-      convert_with_lazy_constants: (Experimental) If true, holds constants
-        lazily during conversion. This can significantly reduce the memory usage
-        and conversion time when converting large models. However, some constant
-        folding and optimizations may be disabled.
+      lightweight_conversion: (Experimental) If True, prioritizes a faster
+        conversion process and a reduced memory footprint. This is achieved by
+        handling constants lazily during the conversion phase, making it ideal
+        for large models that might otherwise hit memory limits. Note that
+        enabling this mode may bypass certain graph optimizations, such as
+        constant folding, in the resulting model.
 
     Returns:
       The converted edge model. If compilation configs are provided, returns the
@@ -197,7 +199,7 @@ class Converter:
         self._signatures,
         strict_export=strict_export,
         quant_config=quant_config,
-        convert_with_lazy_constants=convert_with_lazy_constants,
+        lightweight_conversion=lightweight_conversion,
     )
     if self._compilation_configs:
       return core.aot_compile(self._compilation_configs, converted_model)
@@ -265,7 +267,7 @@ def convert(
     strict_export: Union[Literal["auto"], bool] = False,
     quant_config: Optional[qcfg.QuantConfig] = None,
     dynamic_shapes: Optional[Union[dict[str, Any], Tuple[Any, ...]]] = None,
-    convert_with_lazy_constants: bool = False,
+    lightweight_conversion: bool = False,
 ) -> model.TfLiteModel:
   """Converts a PyTorch model to an edge model with a default signature.
 
@@ -285,10 +287,13 @@ def convert(
       specifications for each input in original order. See
       https://pytorch.org/docs/stable/export.html#expressing-dynamism for more
         details.
-    convert_with_lazy_constants: (Experimental) If true, holds constants lazily
-      during conversion. This can significantly reduce the memory usage and
-      conversion time when converting large models. However, some constant
-      folding and optimizations may be disabled.
+    lightweight_conversion: (Experimental) If True, prioritizes a faster
+      conversion process and a reduced memory footprint. This is achieved by
+      handling constants lazily during the conversion phase, making it ideal
+      for large models that might otherwise hit memory limits. Note that
+      enabling this mode may bypass certain graph optimizations, such as
+      constant folding, in the resulting model.
+
 
   Returns:
     The converted edge model.
@@ -304,5 +309,5 @@ def convert(
       strict_export=strict_export,
       quant_config=quant_config,
       dynamic_shapes=dynamic_shapes,
-      convert_with_lazy_constants=convert_with_lazy_constants,
+      lightweight_conversion=lightweight_conversion,
   )

@@ -628,7 +628,7 @@ class TestConvert(googletest.TestCase):
       litert_torch.config.in_oss,
       "wait until converter next is completely OSS ready.",
   )
-  def test_convert_large_model_with_lazy_constants(self):
+  def test_convert_large_model_with_lightweight_conversion(self):
     """Test converting a simple model with large lazy constants."""
 
     class SampleModel(nn.Module):
@@ -645,7 +645,7 @@ class TestConvert(googletest.TestCase):
     model = SampleModel().eval()
     args = (torch.randn(1),)
     try:
-      em = litert_torch.convert(model, args, convert_with_lazy_constants=True)
+      em = litert_torch.convert(model, args, lightweight_conversion=True)
     except Exception as err:
       self.fail(f"Conversion failed with large lazy constants: {err}")
 
