@@ -15,7 +15,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, Optional, Tuple, Union
+from typing import Any, Literal
 
 from litert_torch import model
 from litert_torch._convert import core
@@ -44,7 +44,7 @@ class Converter:
       sample_args=None,
       sample_kwargs=None,
       *,
-      dynamic_shapes: Optional[Union[dict[str, Any], Tuple[Any, ...]]] = None,
+      dynamic_shapes: dict[str, Any] | tuple[Any, ...] | None = None,
   ) -> Converter:
     """Functions as an alias to `add_signature`."""
     return self.add_signature(
@@ -58,7 +58,7 @@ class Converter:
       sample_args=None,
       sample_kwargs=None,
       *,
-      dynamic_shapes: Optional[Union[dict[str, Any], Tuple[Any, ...]]] = None,
+      dynamic_shapes: dict[str, Any] | tuple[Any, ...] | None = None,
   ) -> Converter:
     """Allows adding a new named torch model along with sample args to the conversion.
 
@@ -131,11 +131,11 @@ class Converter:
       sample_args=None,
       sample_kwargs=None,
       *,
-      strict_export: Union[Literal["auto"], bool] = False,
-      quant_config: Optional[qcfg.QuantConfig] = None,
-      dynamic_shapes: Optional[Union[dict[str, Any], Tuple[Any, ...]]] = None,
+      strict_export: Literal["auto"] | bool = False,
+      quant_config: qcfg.QuantConfig | None = None,
+      dynamic_shapes: dict[str, Any] | tuple[Any, ...] | None = None,
       lightweight_conversion: bool = False,
-  ) -> model.TfLiteModel | litert_types.CompilationResult:
+  ) -> model.LiteRTModel | litert_types.CompilationResult:
     """Finalizes the conversion and produces an edge model.
 
     This could be called with no arguments as follows:
@@ -211,7 +211,7 @@ def signature(
     module: torch.nn.Module,
     sample_args=None,
     sample_kwargs=None,
-    dynamic_shapes: Optional[Union[dict[str, Any], Tuple[Any, ...]]] = None,
+    dynamic_shapes: dict[str, Any] | tuple[Any, ...] | None = None,
 ) -> Converter:
   """Initiates a Converter object with the provided signature.
 
@@ -264,11 +264,11 @@ def convert(
     sample_args=None,
     sample_kwargs=None,
     *,
-    strict_export: Union[Literal["auto"], bool] = False,
-    quant_config: Optional[qcfg.QuantConfig] = None,
-    dynamic_shapes: Optional[Union[dict[str, Any], Tuple[Any, ...]]] = None,
+    strict_export: Literal["auto"] | bool = False,
+    quant_config: qcfg.QuantConfig | None = None,
+    dynamic_shapes: dict[str, Any] | tuple[Any, ...] | None = None,
     lightweight_conversion: bool = False,
-) -> model.TfLiteModel:
+) -> model.LiteRTModel:
   """Converts a PyTorch model to an edge model with a default signature.
 
   Args:
@@ -289,11 +289,10 @@ def convert(
         details.
     lightweight_conversion: (Experimental) If True, prioritizes a faster
       conversion process and a reduced memory footprint. This is achieved by
-      handling constants lazily during the conversion phase, making it ideal
-      for large models that might otherwise hit memory limits. Note that
-      enabling this mode may bypass certain graph optimizations, such as
-      constant folding, in the resulting model.
-
+      handling constants lazily during the conversion phase, making it ideal for
+      large models that might otherwise hit memory limits. Note that enabling
+      this mode may bypass certain graph optimizations, such as constant
+      folding, in the resulting model.
 
   Returns:
     The converted edge model.

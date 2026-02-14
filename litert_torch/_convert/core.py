@@ -13,8 +13,10 @@
 # limitations under the License.
 # ==============================================================================
 
+from __future__ import annotations
+
 import logging
-from typing import Literal, Optional, Union
+from typing import Literal
 
 from litert_torch import fx_infra
 from litert_torch import model
@@ -71,11 +73,11 @@ def _warn_training_modules(signatures: list[signature.Signature]):
 def convert_signatures(
     signatures: list[signature.Signature],
     *,
-    strict_export: Union[Literal["auto"], bool] = False,
-    quant_config: Optional[qcfg.QuantConfig] = None,
+    strict_export: Literal["auto"] | bool = False,
+    quant_config: qcfg.QuantConfig | None = None,
     lightweight_conversion: bool = False,
-) -> model.TfLiteModel:
-  """Converts a list of `signature.Signature`s and embeds them into one `model.TfLiteModel`.
+) -> model.LiteRTModel:
+  """Converts a list of `signature.Signature`s and embeds them into one `model.LiteRTModel`.
 
   Args:
       signatures: The list of 'signature.Signature' objects containing PyTorch
@@ -94,7 +96,7 @@ def convert_signatures(
         constant folding, in the resulting model.
 
   Returns:
-    The converted `model.TfLiteModel` object.
+    The converted `model.LiteRTModel` object.
   """
   _warn_training_modules(signatures)
 
@@ -145,12 +147,12 @@ def convert_signatures(
       lightweight_conversion=lightweight_conversion,
   )
 
-  return model.TfLiteModel(exporter)
+  return model.LiteRTModel(exporter)
 
 
 def aot_compile(
     compilation_configs: list[litert_types.CompilationConfig],
-    cpu_model: model.TfLiteModel,
+    cpu_model: model.LiteRTModel,
 ) -> litert_types.CompilationResult:
   """Compiles the given CPU model.
 
@@ -161,7 +163,7 @@ def aot_compile(
   Returns:
     The compilation result.
   """
-  litert_model = litert_types.Model.create_from_bytes(cpu_model.tflite_model())
+  litert_model = litert_types.Model.create_from_bytes(cpu_model.model_content())
   return aot_compile_lib.aot_compile(
       litert_model,
       config=compilation_configs,

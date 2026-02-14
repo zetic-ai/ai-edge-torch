@@ -388,7 +388,7 @@ class TestConvert(googletest.TestCase):
     np.testing.assert_almost_equal(edge_output["y_data_2_1"], args[2])
 
     interpreter = tfl_interpreter.Interpreter(
-        model_content=edge_model.tflite_model()
+        model_content=edge_model.model_content()
     )
     runner = interpreter.get_signature_runner("serving_default")
     output_details = runner.get_output_details()
@@ -401,7 +401,7 @@ class TestConvert(googletest.TestCase):
     model.eval()
     edge_model = litert_torch.convert(model, args, kwargs)
     interpreter = tfl_interpreter.Interpreter(
-        model_content=edge_model.tflite_model()
+        model_content=edge_model.model_content()
     )
     runner = interpreter.get_signature_runner("serving_default")
     input_details = runner.get_input_details()
