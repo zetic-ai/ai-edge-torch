@@ -42,9 +42,9 @@ def _scaled_dot_product_attention(
     key_cache: A tuple of Key tensor. 1(bk)hs
     value_cache: A tuple of Value tensor. 1(bk)sh
     head_size (int): head dimension.
-    mask (torch.Tensor): the optional mask tensor.
     k_ts_idx (int): the timestamp index of the key tensor.
     v_ts_idx (int): the timestamp index of the value tensor.
+    mask (torch.Tensor): the optional mask tensor.
     scale (float): the optional scale factor.
     softcap (float): the optional softcap for the logits.
 
@@ -74,15 +74,19 @@ def _scaled_dot_product_attention(
   logits1 = bmm_fn(query, key)
   logits = torch.cat([logits0, logits1], dim=-1)
 
-  _, bk, gt, s = logits.shape
+  _, _, gt, _ = logits.shape
   g = gt // t
-  logits = logits.reshape((bk, g, t, s))
   if softcap is not None:
     logits = torch.tanh(logits / softcap)
     logits = logits * softcap
 
+  if g != 1:
+    mask_to_bc = []
+    for _ in range(g):
+      mask_to_bc.append(mask)
+    mask = torch.cat(mask_to_bc, dim=-2)  # 1, 1, gt, s
+
   padded_logits = logits + mask
-  padded_logits = padded_logits.reshape(1, bk, gt, s)
   probs = F.softmax(padded_logits, dim=-1).type_as(key)
   probs0, probs1 = probs[..., :-t], probs[..., -t:]
 
