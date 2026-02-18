@@ -451,7 +451,7 @@ def _aten_slice_scatter(lctx, self, src, dim=0, start=None, end=None, step=1):
   pred[np.index_exp[tuple(slices)]] = False
   pred = stablehlo.constant(
       ir.DenseElementsAttr.get(
-          np.packbits(pred, bitorder="little"),
+          pred,
           type=ir.IntegerType.get_signless(1),
           shape=pred.shape,
       )

@@ -264,6 +264,11 @@ def export_text_prefill_decode_model(
   lrt_model = converter.convert(strict_export=False)
   print('Converting model done.')
 
+  lrt_model = mu_pass_lib.update_model(lrt_model)
+  if kwargs.get('experimental_use_mixed_precision', False):
+    print('Applying mixed precision to model...')
+    lrt_model = mu_pass_lib.apply_mixed_precision(lrt_model)
+
   model_path = os.path.join(work_dir, 'model.tflite')
   print(f'Exporting model to {model_path}...')
   lrt_model.export(model_path)
@@ -283,11 +288,6 @@ def export_text_prefill_decode_model(
     model_path = maybe_quantize_model(model_path, recipe)
     gc.collect()
 
-  mu_pass_lib.update_model(model_path, model_path)
-  if kwargs.get('experimental_use_mixed_precision', False):
-    print('Applying mixed precision to model...')
-    mu_pass_lib.apply_mixed_precision(model_path, model_path)
-    gc.collect()
   return model_path
 
 

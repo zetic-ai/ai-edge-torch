@@ -14,9 +14,12 @@
 # ==============================================================================
 """Model optimization passes."""
 
-import copy
-
+from typing import Any, cast
+from litert_torch import model as model_lib
+from litert_torch._convert import litert_converter
 import numpy as np
+
+LazyModelExporter = litert_converter.LazyModelExporter
 
 try:
   # pylint: disable=g-import-not-at-top
@@ -28,6 +31,7 @@ try:
   # pylint: enable=g-import-not-at-top
 
   _is_mu_available = True
+  MuModuleOp = mu.dialect.mlir.ModuleOp
 
   class HFTransformersOptimize(core.RewritePatternPassBase):
     """Rewrite pass."""
@@ -52,9 +56,9 @@ try:
       reduction_elements = int(1.0 / red_x)
 
       input_shape = op.operands[0].type.shape
-      infered_elements = np.prod(
-          np.take(input_shape, reduction_axis.numpy())
-      ).astype(int)
+      infered_elements = int(
+          np.prod(np.take(input_shape, reduction_axis.numpy()))
+      )
       if reduction_elements != infered_elements:
         return
       out = mul_op.results[0]
@@ -72,45 +76,76 @@ try:
 
 except ImportError:
   _is_mu_available = False
+  MuModuleOp = Any
 
 
 def is_mu_available() -> bool:
   return _is_mu_available
 
 
-def call_pass(input_model: bytes) -> bytes:
+def call_pass(mu_module: MuModuleOp) -> MuModuleOp:
   """Calls the pass to optimize the model."""
   if not is_mu_available():
-    return input_model
+    return mu_module
 
-  original_module, ctx = mu.read_flatbuffer(content=input_model)
-  module = copy.deepcopy(original_module)
+  # original_module = mu_module
+  # mu_module = copy.deepcopy(original_module)
 
   pass_to_call = HFTransformersOptimize
 
+  pass_to_call()(mu_module)
+
+  # Add verify when bug is fixed with xdsl.
+  mu_module.cleanup()
+  return mu_module
+
+
+def _litert_model_to_model_utils(model: model_lib.LiteRTModel):
+  """Converts a LiteRT model to ModelUtils ModuleOp."""
+  exporter = cast(model_lib.ModelExporter, model._exporter)
+  if isinstance(exporter, LazyModelExporter) and exporter.module is not None:
+    # Quick path: avoid serialization and deserialization.
+    ir_module = exporter.module
+    ctx = ir_module.context
+    with ctx:
+      mu_module = mu.transform.mlir_to_model_utils(ir_module)
+  else:
+    # Slow path: reconstruct the model from bytes.
+    mu_module, ctx = mu.read_flatbuffer(content=model.model_content())
+
+  return mu_module, ctx
+
+
+def _model_utils_to_litert_model(
+    mu_module: MuModuleOp, ctx
+) -> model_lib.LiteRTModel:
+  """Converts a ModelUtils ModuleOp to LiteRT model."""
   with ctx:
-    pass_to_call()(module)
-    # Add verify when bug is fixed with xdsl.
-    module.cleanup()
-    return mu.write_flatbuffer(module)
+    ir_module = mu.transform.model_utils_to_mlir(mu_module, ir_context=ctx)
+  new_exporter = LazyModelExporter(module=ir_module)
+  return model_lib.LiteRTModel(new_exporter)
 
 
-def update_model(input_model_path: str, output_model_path: str):
-  """Updates the model."""
-  with open(input_model_path, "rb") as f:
-    input_model = f.read()
-  output_model = call_pass(input_model)
-  with open(output_model_path, "wb") as f:
-    f.write(output_model)
+def update_model(model: model_lib.LiteRTModel) -> model_lib.LiteRTModel:
+  """Updates the model with the optimization passes."""
+  if not is_mu_available():
+    return model
+
+  mu_module, ctx = _litert_model_to_model_utils(model)
+  with ctx:
+    mu_module = call_pass(mu_module)
+  return _model_utils_to_litert_model(mu_module, ctx)
 
 
-def apply_mixed_precision(model_path: str, output_model_path: str):
+def apply_mixed_precision(
+    model: model_lib.LiteRTModel,
+) -> model_lib.LiteRTModel:
   # TODO(weiyiw): Merge into call_pass.
   from litert_torch.generative.export_hf.core.mu import mixed_precision  # pylint: disable=g-import-not-at-top
 
-  print("Applying mixed precision to model...")
-  output_model = mixed_precision.convert_model_to_fp16(
-      model_path, mixed_precision.fp32_predicate
-  )
-  with open(output_model_path, "wb") as f:
-    f.write(output_model)
+  mu_module, ctx = _litert_model_to_model_utils(model)
+  with ctx:
+    print("Applying mixed precision to model...")
+    mixed_precision.convert_to_fp16(mu_module, mixed_precision.fp32_predicate)
+
+  return _model_utils_to_litert_model(mu_module, ctx)

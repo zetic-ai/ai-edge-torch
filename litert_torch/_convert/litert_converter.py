@@ -57,8 +57,14 @@ class LazyModelExporter(model_lib.ModelExporter):
   mean to load the model in memory but just to save it to a file.
   """
 
-  module: ir.Module | None = None
+  module: ir.Module | ir.Operation | None = None
   content: bytes | None = None
+
+  @property
+  def _module_op(self) -> ir.Operation | None:
+    if isinstance(self.module, ir.Module):
+      return self.module.operation
+    return self.module
 
   def to_file(self, path: str):
     """Exports the module to a flatbuffer file."""
@@ -69,12 +75,24 @@ class LazyModelExporter(model_lib.ModelExporter):
         f.write(self.content)
       return
 
-    converter_api_ext.export_flatbuffer_to_file(self.module, path)
+    try:
+      # TODO b/478909085 - Remove the try-except once converter_api_ext is
+      # stable in OSS.
+      converter_api_ext.export_flatbuffer_to_file(self._module_op, path)
+    except TypeError:
+      converter_api_ext.export_flatbuffer_to_file(self.module, path)
 
   def to_bytes(self) -> bytes:
     """Returns the flatbuffer bytes of the module."""
     if self.content is None:
-      self.content = converter_api_ext.export_flatbuffer_to_bytes(self.module)
+      try:
+        # TODO b/478909085 - Remove the try-except once converter_api_ext is
+        # stable in OSS.
+        self.content = converter_api_ext.export_flatbuffer_to_bytes(
+            self._module_op
+        )
+      except TypeError:
+        self.content = converter_api_ext.export_flatbuffer_to_bytes(self.module)
       self.module = None
 
     return self.content
