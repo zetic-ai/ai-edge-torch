@@ -13,8 +13,10 @@
 # limitations under the License.
 # ==============================================================================
 """ExportedProgram.run_decompositions wrapper to handle unexpected export behavior."""
+
 import operator
 from typing import Any, Callable
+from litert_torch import progress
 import torch
 
 
@@ -69,6 +71,7 @@ def annotate_force_decomp(decomp: Callable[..., Any]):
   return decomp
 
 
+@progress.task("ExportedProgram Run Decompositions")
 def safe_run_decompositions(exported_program, decomp_table=None, can_skip=True):
   """Wrapper for ExportedProgram.run_decompositions to handle unexpected export behavior."""
 

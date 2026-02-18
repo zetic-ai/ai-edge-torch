@@ -93,5 +93,14 @@ class _Config:
   def lazy_constant_getter_chunk_size(self, value: int) -> None:
     os.environ["LAZY_CONSTANT_GETTER_CHUNK_SIZE"] = str(value)
 
+  @property
+  def show_progress(self) -> bool:
+    """True if the progress should be shown."""
+    return _get_bool_env_var("LITERT_TORCH_SHOW_PROGRESS", default=True)
+
+  @show_progress.setter
+  def show_progress(self, value: bool):
+    os.environ["LITERT_TORCH_SHOW_PROGRESS"] = "y" if value else "n"
+
 
 config = _Config()

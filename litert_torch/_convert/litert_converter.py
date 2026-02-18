@@ -18,6 +18,7 @@ import dataclasses
 
 from litert_torch import backend
 from litert_torch import model as model_lib
+from litert_torch import progress
 from litert_torch._convert import signature
 from litert_torch.backend import inline_consts as inline_consts_lib
 from litert_torch.quantize import quant_config as qcfg
@@ -75,16 +76,20 @@ class LazyModelExporter(model_lib.ModelExporter):
         f.write(self.content)
       return
 
-    try:
-      # TODO b/478909085 - Remove the try-except once converter_api_ext is
-      # stable in OSS.
-      converter_api_ext.export_flatbuffer_to_file(self._module_op, path)
-    except TypeError:
-      converter_api_ext.export_flatbuffer_to_file(self.module, path)
+    with progress.task(f"Write Model to {path}"):
+      try:
+        # TODO b/478909085 - Remove the try-except once converter_api_ext is
+        # stable in OSS.
+        converter_api_ext.export_flatbuffer_to_file(self._module_op, path)
+      except TypeError:
+        converter_api_ext.export_flatbuffer_to_file(self.module, path)
 
   def to_bytes(self) -> bytes:
     """Returns the flatbuffer bytes of the module."""
-    if self.content is None:
+    if self.content is not None:
+      return self.content
+
+    with progress.task("Write Model to Bytes"):
       try:
         # TODO b/478909085 - Remove the try-except once converter_api_ext is
         # stable in OSS.
@@ -93,8 +98,8 @@ class LazyModelExporter(model_lib.ModelExporter):
         )
       except TypeError:
         self.content = converter_api_ext.export_flatbuffer_to_bytes(self.module)
-      self.module = None
 
+    self.module = None
     return self.content
 
 
@@ -114,7 +119,6 @@ def exported_programs_to_flatbuffer(
     )
 
   ir_context = backend.export_utils.create_ir_context()
-
   cross_program_inline_consts_ctx = inline_consts_lib.InlineConstsContext(
       enable_lazy_constants=lightweight_conversion,
   )
@@ -122,11 +126,12 @@ def exported_programs_to_flatbuffer(
   lowered_programs = []
   for exported_program, sig in zip(exported_programs, signatures):
     # Convert ExportedProgram to Mlir Module.
-    lowered = backend.export.exported_program_to_mlir(
-        exported_program,
-        ir_context=ir_context,
-        lowering_context_plugins=[cross_program_inline_consts_ctx],
-    )
+    with progress.task(f"Lower to MLIR: {sig.name}"):
+      lowered = backend.export.exported_program_to_mlir(
+          exported_program,
+          ir_context=ir_context,
+          lowering_context_plugins=[cross_program_inline_consts_ctx],
+      )
 
     # Set signature.
     sig_name = sig.name
@@ -141,9 +146,10 @@ def exported_programs_to_flatbuffer(
     lowered_programs.append(lowered)
 
   # Merge all lowered modules into one module.
-  merged_module = converter_api_ext.merge_modules(
-      [lowered.module for lowered in lowered_programs]
-  )
+  with progress.task("Merge MLIR Modules"):
+    merged_module = converter_api_ext.merge_modules(
+        [lowered.module for lowered in lowered_programs]
+    )
 
   # Prepare ai-edge-quantizer recipe.
   translated_recipe = None
@@ -170,7 +176,7 @@ def exported_programs_to_flatbuffer(
   config.canonicalizing_inf_as_min_max_float = False
 
   # Run LiteRT converter passes.
-  with ir_context:
+  with ir_context, progress.task("Run LiteRT Converter Passes"):
     pass_manager = passmanager.PassManager()
     converter_api_ext.run_convert_to_tfl_passes(
         merged_module, pass_manager, config
@@ -181,9 +187,10 @@ def exported_programs_to_flatbuffer(
 
   # Quantize the model if needed.
   if translated_recipe:
-    model_bytes = translate_recipe.quantize_model(
-        exporter.to_bytes(), translated_recipe
-    )
-    exporter = LazyModelExporter(content=model_bytes)
+    with progress.task("Quantize Model"):
+      model_bytes = translate_recipe.quantize_model(
+          exporter.to_bytes(), translated_recipe
+      )
+      exporter = LazyModelExporter(content=model_bytes)
 
   return exporter

@@ -20,6 +20,7 @@ from typing import Literal
 
 from litert_torch import fx_infra
 from litert_torch import model
+from litert_torch import progress
 from litert_torch._convert import fx_passes
 from litert_torch._convert import litert_converter
 from litert_torch._convert import signature
@@ -70,6 +71,7 @@ def _warn_training_modules(signatures: list[signature.Signature]):
     logging.warning(message)
 
 
+@progress.task("LiteRT-Torch Convert")
 def convert_signatures(
     signatures: list[signature.Signature],
     *,
@@ -127,18 +129,20 @@ def convert_signatures(
     )
     return exported_program
 
-  exported_programs = [
-      export(
+  exported_programs = []
+  for sig in signatures:
+    with progress.task(f"Torch Export: {sig.name}"):
+      exported_program = export(
           mod=sig.module,
           args=sig.args,
           kwargs=sig.kwargs,
           dynamic_shapes=sig.dynamic_shapes,
       )
-      for sig in signatures
-  ]
+    exported_programs.append(exported_program)
 
   # Apply default fx passes
-  exported_programs = list(map(_run_convert_passes, exported_programs))
+  with progress.task("Run FX Passes"):
+    exported_programs = list(map(_run_convert_passes, exported_programs))
 
   exporter = litert_converter.exported_programs_to_flatbuffer(
       exported_programs,

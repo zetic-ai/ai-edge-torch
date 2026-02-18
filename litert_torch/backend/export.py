@@ -21,6 +21,7 @@ import operator
 from typing import Any, Callable, Optional
 
 from litert_torch import fx_infra
+from litert_torch import progress
 from litert_torch.backend import _torch_future
 from litert_torch.backend import debuginfo
 from litert_torch.backend import export_utils
@@ -375,7 +376,7 @@ def exported_program_to_mlir(
   if not ir_context:
     ir_context = export_utils.create_ir_context()
 
-  with ir_context, ir.Location.unknown():
+  with ir_context, ir.Location.unknown(), progress.task("Create MLIR Module"):
 
     module = ir.Module.create()
     lctx = LoweringContext(ir_context, module)
