@@ -14,6 +14,7 @@
 # ==============================================================================
 """Export library for HF integration."""
 
+import dataclasses
 import gc
 import json
 import os
@@ -33,12 +34,25 @@ from litert_torch.generative.export_hf.core.external_rope import preprocess_mode
 from litert_torch.generative.export_hf.core.mu import mu_pass_lib
 from litert_torch.generative.export_hf.core.split_cache import attention as _
 from litert_torch.generative.export_hf.core.split_cache import exportable_module as split_cache_module
+from litert_torch.generative.export_hf.model_ext import exportables as model_ext_exportables
 from litert_torch.generative.tools import tokenizer_to_sentencepiece_lib as tokenizer_lib
 import torch
 import transformers
 
 from ai_edge_quantizer import quantizer as quantizer_lib
 from ai_edge_quantizer import recipe as recipe_lib
+
+
+@dataclasses.dataclass
+class SourceModelArtifacts:
+  """Source model artifacts."""
+
+  model: torch.nn.Module
+  model_config: transformers.PretrainedConfig
+  text_model_config: transformers.PretrainedConfig
+  tokenizer: transformers.PreTrainedTokenizerBase
+
+  image_processor: transformers.AutoImageProcessor | None = None
 
 
 def verify_model_compatibility(model, model_config, text_model_config):
@@ -82,7 +96,7 @@ def load_model(
     trust_remote_code: bool = False,
     auto_model_override: str | None = None,
     task: str = 'text_generation',
-):
+) -> SourceModelArtifacts:
   """Loads model from checkpoint."""
 
   config = transformers.AutoConfig.from_pretrained(
@@ -118,6 +132,16 @@ def load_model(
 
   if task == 'text_generation':
     verify_model_compatibility(model, config, text_model_config)
+  else:
+    # TODO(weiyiw): Add support for other tasks.
+    pass
+
+  if task == 'image_text_to_text':
+    image_processor = transformers.AutoImageProcessor.from_pretrained(
+        model_path
+    )
+  else:
+    image_processor = None
 
   # TODO(weiyiw): Refactor into a separate function.
   tokenizer = transformers.AutoTokenizer.from_pretrained(model_path)
@@ -137,7 +161,13 @@ def load_model(
     except Exception as e:  # pylint: disable=broad-exception-caught
       print(f'Failed to load chat template: {e}')
 
-  return model, config, text_model_config, tokenizer
+  return SourceModelArtifacts(
+      model=model,
+      model_config=config,
+      text_model_config=text_model_config,
+      tokenizer=tokenizer,
+      image_processor=image_processor,
+  )
 
 
 def get_prefill_decode_exportable_cls(
@@ -353,6 +383,64 @@ def export_embedder_model(
     model_path = maybe_quantize_model(model_path, recipe)
     gc.collect()
   return model_path
+
+
+def export_vision_encoder_models(
+    model,
+    image_processor,
+    model_config,
+    tokenizer,
+    export_config: exportable_module.ExportableModuleConfig,
+    work_dir: str,
+    quantization_recipe: str | None = None,
+):
+  """Exports vision encoder models."""
+  model.set_attn_implementation('eager')
+  encoder_module_cls, adapter_module_cls = (
+      model_ext_exportables.get_vision_exportables(model_config)
+  )
+  encode_module = encoder_module_cls(model, export_config)
+  adapter_module = adapter_module_cls(model, export_config, tokenizer)
+  converter = converter_utils.Converter()
+  sample_inputs = encode_module.get_sample_inputs(
+      model_config, image_processor=image_processor
+  )
+  for signature_name, (sample_inputs, _) in sample_inputs.items():
+    converter.add_signature(
+        signature_name,
+        encode_module.eval(),
+        sample_kwargs=sample_inputs,
+    )
+  lrt_model = converter.convert(strict_export=False)
+  vision_encoder_path = os.path.join(work_dir, 'vision_encoder.tflite')
+  lrt_model.export(vision_encoder_path)
+  quantization_recipe_list = (
+      quantization_recipe.split(',') if quantization_recipe else [None]
+  )
+  for recipe in quantization_recipe_list:
+    vision_encoder_path = maybe_quantize_model(vision_encoder_path, recipe)
+    gc.collect()
+
+  converter = converter_utils.Converter()
+  sample_inputs = adapter_module.get_sample_inputs(
+      model_config, image_processor=image_processor
+  )
+  for signature_name, (sample_inputs, _) in sample_inputs.items():
+    converter.add_signature(
+        signature_name,
+        adapter_module.eval(),
+        sample_kwargs=sample_inputs,
+    )
+  lrt_model = converter.convert(strict_export=False)
+  adapter_path = os.path.join(work_dir, 'vision_adapter.tflite')
+  lrt_model.export(adapter_path)
+  quantization_recipe_list = (
+      quantization_recipe.split(',') if quantization_recipe else [None]
+  )
+  for recipe in quantization_recipe_list:
+    adapter_path = maybe_quantize_model(adapter_path, recipe)
+    gc.collect()
+  return vision_encoder_path, adapter_path
 
 
 def export_auxiliary_model(

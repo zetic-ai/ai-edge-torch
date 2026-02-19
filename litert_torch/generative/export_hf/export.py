@@ -46,22 +46,66 @@ def export(
     bundle_litert_lm: bool = True,
     experimental_use_mixed_precision: bool = False,
     litert_lm_model_type_override: str | None = None,
+    export_vision_encoder: bool = False,
+    # TODO(weiyiw): Update when b/481323182 is fixed.
+    vision_encoder_quantization_recipe: str = 'weight_only_wi8_afp32',
 ):
-  """Exports HuggingFace Transformers model to tflite."""
+  """Exports HuggingFace Transformers model to tflite.
+
+  Args:
+    model: The name of the HuggingFace Transformers model to export, or the path
+      to the safetensors directory.
+    output_dir: The directory to export the model to.
+    prefill_lengths: The lengths of the prefill input, separated by comma.
+    cache_length: The length of the cache.
+    quantization_recipe: The quantization recipes to use, separated by comma.
+    enable_dynamic_shape: Whether to enable dynamic shape.
+    externalize_embedder: Whether to externalize the embedder.
+    single_token_embedder: Whether to use a single token embedder.
+    key_ts_idx: The index of time step dimension in the key tensor.
+    value_ts_idx: The index of time step dimension in the value tensor.
+    split_cache: Whether to use split cache attention.
+    auto_model_override: Overriding the AutoModel class to use for export.
+    keep_temporary_files: Whether to keep the temporary files.
+    trust_remote_code: Whether to trust remote code.
+    use_jinja_template: Whether to use jinja template.
+    task: The task to export the model for. Use 'text_generation' for text only
+      LLMs, and 'image_text_to_text' for Vision LLMs.
+    bundle_litert_lm: Whether to bundle the model as a LiteRT LM file.
+    experimental_use_mixed_precision: Whether to enable mixed precision.
+    litert_lm_model_type_override: Overriding the LiteRT LM model type.
+    export_vision_encoder: Whether to export the vision encoder.
+    vision_encoder_quantization_recipe: The quantization recipe to use for the
+      vision encoder.
+  """
   os.makedirs(output_dir, exist_ok=True)
   if not keep_temporary_files:
     work_dir = tempfile.mkdtemp(dir=output_dir)
   else:
     work_dir = output_dir
-  pt_model, config, text_model_config, tokenizer = export_lib.load_model(
+  source_model_artifacts = export_lib.load_model(
       model,
       trust_remote_code=trust_remote_code,
       auto_model_override=auto_model_override,
       task=task,
   )
-  del config  # Unused.
-  if split_cache and not externalize_embedder:
-    raise ValueError('Split cache requires externalize embedder to be enabled.')
+  pt_model, config, text_model_config, tokenizer, image_processor = (
+      source_model_artifacts.model,
+      source_model_artifacts.model_config,
+      source_model_artifacts.text_model_config,
+      source_model_artifacts.tokenizer,
+      source_model_artifacts.image_processor,
+  )
+
+  if export_vision_encoder:
+    assert (
+        externalize_embedder
+    ), 'Exporting vision encoder requires externalize_embedder to be enabled.'
+  if split_cache:
+    assert (
+        externalize_embedder
+    ), 'Split_cache requires externalize_embedder to be enabled.'
+
   export_config = exportable_module.ExportableModuleConfig(
       batch_size=1,
       prefill_lengths=prefill_lengths,
@@ -90,6 +134,17 @@ def export(
       quantization_recipe,
       experimental_use_mixed_precision=experimental_use_mixed_precision,
   )
+  if export_vision_encoder:
+    # TODO(weiyiw): Add support for packaging vision encoder models.
+    export_lib.export_vision_encoder_models(
+        pt_model,
+        image_processor,
+        config,
+        tokenizer,
+        export_config,
+        work_dir,
+        vision_encoder_quantization_recipe or quantization_recipe,
+    )
   gc.collect()
   if externalize_embedder:
     export_lib.export_embedder_model(
@@ -114,7 +169,7 @@ def export(
       work_dir,
       'model_quantized.tflite' if quantization_recipe else 'model.tflite',
   )
-  if externalize_embedder or split_cache:
+  if externalize_embedder or split_cache or export_vision_encoder:
     # TODO(weiyiw): Add support for packaging models.
     return
   if bundle_litert_lm:

@@ -172,6 +172,7 @@ class LiteRTSplitCacheExportableModuleForDecoderOnlyLMPrefill(
   def get_sample_inputs(
       self,
       model_config,
+      **kwargs,
   ):
     export_config = self.export_config
     kv_cache_inputs, _ = self.get_sample_kv_cache(model_config)
@@ -218,6 +219,7 @@ class LiteRTSplitCacheExportableModuleForDecoderOnlyLMGenerate(
   def get_sample_inputs(
       self,
       model_config,
+      **kwargs,
   ):
     export_config = self.export_config
     kv_cache_inputs, _ = self.get_sample_kv_cache(model_config)

@@ -56,6 +56,7 @@ class RoPEEmbedder(torch.nn.Module):
       cls,
       model_config,
       export_config: base_exportable_module.ExportableModuleConfig,
+      **kwargs,
   ):
     """Gets sample inputs."""
     del model_config

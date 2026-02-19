@@ -102,6 +102,7 @@ class LiteRTExportableModuleForEmbedder(torch.nn.Module):
       cls,
       model_config,
       export_config: base_exportable_module.ExportableModuleConfig,
+      **kwargs,
   ):
     """Gets sample inputs."""
     batch_size = export_config.batch_size
