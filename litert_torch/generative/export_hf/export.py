@@ -16,6 +16,8 @@
 
 import gc
 import os
+import shutil
+import tempfile
 
 from litert_torch.generative.export_hf.core import export_lib
 from litert_torch.generative.export_hf.core import exportable_module
@@ -36,6 +38,7 @@ def export(
     value_ts_idx: int = 3,
     split_cache: bool = False,
     auto_model_override: str | None = None,
+    keep_temporary_files: bool = False,
     # target_accelerator: str | None = None,
     trust_remote_code: bool = False,
     use_jinja_template: bool = False,
@@ -45,9 +48,11 @@ def export(
     litert_lm_model_type_override: str | None = None,
 ):
   """Exports HuggingFace Transformers model to tflite."""
-  # TODO(weiyiw): Use tmp dir for work_dir.
-  work_dir = output_dir
-  os.makedirs(work_dir, exist_ok=True)
+  os.makedirs(output_dir, exist_ok=True)
+  if not keep_temporary_files:
+    work_dir = tempfile.mkdtemp(dir=output_dir)
+  else:
+    work_dir = output_dir
   pt_model, config, text_model_config, tokenizer = export_lib.load_model(
       model,
       trust_remote_code=trust_remote_code,
@@ -124,3 +129,6 @@ def export(
         use_jinja_template,
         litert_lm_model_type_override,
     )
+  if not keep_temporary_files:
+    print(f'Removing temporary files from: {work_dir}')
+    shutil.rmtree(work_dir)
