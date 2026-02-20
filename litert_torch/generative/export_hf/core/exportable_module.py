@@ -116,8 +116,6 @@ class LiteRTExportableModuleForDecoderOnlyLM(ExportableModuleBase):
     ].create_from_config(
         model_config,
         export_config,
-        k_ts_idx=export_config.k_ts_idx,
-        v_ts_idx=export_config.v_ts_idx,
         batch_size=export_config.batch_size,
         cache_length=export_config.cache_length,
     )
